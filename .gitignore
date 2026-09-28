@@ -1,0 +1,6 @@
+dump1090/
+captures/
+results/
+*.bin
+__pycache__/
+.DS_Store
