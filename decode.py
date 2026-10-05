@@ -18,7 +18,7 @@ def load_mag(path):
     return mag_from_raw(np.fromfile(path, dtype=np.uint8))
 
 
-def candidates(mag, k=4.0):
+def candidates(mag, k=3.0, strict=False):
     """Places where the four preamble blinks line up above k times the typical level."""
     corr = np.correlate(mag, PRE, mode="valid")
     thresh = k * np.median(corr)
@@ -27,7 +27,7 @@ def candidates(mag, k=4.0):
         if i > len(mag) - 240:
             break                                 # too close to the end for a whole message
         p = mag[i:i + 16]
-        if (p[0] > p[1] and p[2] > p[3] and p[7] > p[8] and p[9] > p[10]
+        if not strict or (p[0] > p[1] and p[2] > p[3] and p[7] > p[8] and p[9] > p[10]
                 and max(p[4], p[5], p[6]) < p[0] / 2 and p[11:16].max() < p[0] / 2):
             keep.append(i)
     return keep
@@ -52,16 +52,19 @@ def bits_to_hex(bits):
     return f"{int(''.join(map(str, bits)), 2):0{len(bits) // 4}X}"
 
 
-def decode(mag, k=4.0):
-    """All intact 112-bit messages as (start, hex)."""
-    found, skip_until = [], 0
-    for start in candidates(mag, k):
-        if start < skip_until:
-            continue                              # still inside a message already accepted
+def decode(mag, k=3.0, strict=False):
+    """All intact 112-bit messages as (start, hex), each physical message once."""
+    passes = []
+    for start in candidates(mag, k, strict):
         bits = slice_bits(mag, start)
         if crc24(bits) == 0:
-            found.append((start, bits_to_hex(bits)))
-            skip_until = start + 240
+            passes.append((start, bits_to_hex(bits)))
+
+    found = []
+    for start, m in passes:                       # already in time order
+        if found and found[-1][1] == m and start - found[-1][0] < 240:
+            continue                              # same message, caught again a few samples later
+        found.append((start, m))
     return found
 
 

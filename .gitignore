@@ -5,3 +5,5 @@ results/
 __pycache__/
 .DS_Store
 .venv/
+receiver.py
+.ipynb_checkpoints
