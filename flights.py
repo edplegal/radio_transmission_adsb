@@ -12,6 +12,8 @@ from coverage import distance_km
 
 DATA = "../data"
 GAP_S = 600          # unheard this long = a new flight
+MAX_KM = 150         # farther than this from the receiver = a bad position
+MAX_KM_S = 0.35      # faster than any airliner (about 1260 km/h) = a bad position
 STEP_S = 60          # video: one frame per minute of real time
 TRAIL_S = 300        # each aircraft drags its last five minutes behind it
 
@@ -31,7 +33,7 @@ def load(paths):
                     calls[addr] = fields[10].strip()
                 elif fields[1] == "3" and fields[14] and fields[15]:
                     lat, lon = float(fields[14]), float(fields[15])
-                    if distance_km(*RECEIVER, lat, lon) < 300:         # drop the bad pairings
+                    if distance_km(*RECEIVER, lat, lon) < MAX_KM:      # drop the bad pairings
                         alt = float(fields[11]) if fields[11] else math.nan
                         pos.append((t, addr, alt, lat, lon))
     return pos, calls
@@ -47,9 +49,14 @@ def split_flights(pos):
         track.sort()
         current = [track[0]]
         for p in track[1:]:
-            if p[0] - current[-1][0] > GAP_S:
+            last = current[-1]
+            if p[0] - last[0] > GAP_S:
                 flights.append(current)
-                current = []
+                current = [p]
+                continue
+            dt = max(p[0] - last[0], 1.0)
+            if distance_km(last[3], last[4], p[3], p[4]) / dt > MAX_KM_S:
+                continue                      # a jump no aircraft can make: skip it
             current.append(p)
         flights.append(current)
     return flights
@@ -58,7 +65,8 @@ def split_flights(pos):
 if __name__ == "__main__":
     pos, calls = load(sorted(glob.glob(f"{DATA}/sbs_t_*.txt")))
     flights = split_flights(pos)
-    print(f"{len(pos)} positions, {len(flights)} flights")
+    clean = sorted(p for fl in flights for p in fl)     # what survived the speed cut
+    print(f"{len(pos)} positions, {len(clean)} after the speed cut, {len(flights)} flights")
 
     # Static: every flight as its own line
     fig, ax = plt.subplots(figsize=(8, 8))
@@ -74,10 +82,10 @@ if __name__ == "__main__":
         print(f"{calls.get(fl[0][1], fl[0][1]):10} {start}  {len(fl)} positions")
 
     # Video: aircraft moving, trails fading out after five minutes
-    t = np.array([p[0] for p in pos])
-    lat = np.array([p[3] for p in pos])
-    lon = np.array([p[4] for p in pos])
-    alt = np.array([p[2] for p in pos])
+    t = np.array([p[0] for p in clean])
+    lat = np.array([p[3] for p in clean])
+    lon = np.array([p[4] for p in clean])
+    alt = np.array([p[2] for p in clean])
 
     vfig, vax = plt.subplots(figsize=(8, 8))
     vax.set_xlim(lon.min(), lon.max())
@@ -108,7 +116,7 @@ if __name__ == "__main__":
     fig.savefig("results/top_flights.png", dpi=150)
 
     print("receiver:", RECEIVER)
-    lats = [p[3] for p in pos]; lons = [p[4] for p in pos]
+    lats = [p[3] for p in clean]; lons = [p[4] for p in clean]
     print("lat range:", min(lats), max(lats))
     print("lon range:", min(lons), max(lons))
-    print("farthest kept:", max(distance_km(*RECEIVER, p[3], p[4]) for p in pos), "km")
+    print("farthest kept:", max(distance_km(*RECEIVER, p[3], p[4]) for p in clean), "km")
