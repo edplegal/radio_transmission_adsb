@@ -17,10 +17,10 @@ def load_key(path):
         return {line[1:-1].upper() for line in f.read().splitlines() if is_adsb(line[1:-1])}
 
 
-def run(mag, key, k, strict):
-    found = decode(mag, k, strict)
+def run(mag, key, k, strict, repair_bits=False):
+    found = decode(mag, k, strict, repair_bits)
     mine = {m for start, m in found if is_adsb(m) and start < DUMP1090_READ_LIMIT}
-    print(f"k={k}, strict={strict}: both {len(key & mine)}, missed {len(key - mine)}, "
+    print(f"k={k}, strict={strict}, repair={repair_bits}: both {len(key & mine)}, missed {len(key - mine)}, "
           f"extra {len(mine - key)}, recovery {len(key & mine) / len(key):.0%}")
     return mine
 
@@ -50,3 +50,11 @@ if __name__ == "__main__":
 
     mine = run(mag, key, k=3.0, strict=False)
     diagnose(mag, key - mine)
+
+    print("\nwith soft-decision repair:")
+    repaired = run(mag, key, k=3.0, strict=False, repair_bits=True)
+    print("recovered by repair:", sorted(repaired - mine))
+    print("still missed:", sorted(key - repaired))
+    all_found = {m for s, m in decode(mag, 3.0, False, True)}
+    all_plain = {m for s, m in decode(mag, 3.0, False)}
+    print(f"whole file, any length/format: {len(all_plain)} without repair, {len(all_found)} with")

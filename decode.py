@@ -33,11 +33,35 @@ def candidates(mag, k=3.0, strict=False):
     return keep
 
 
+def preamble_score(mag, start):
+    """How well the 16 samples at start match the preamble's four blinks."""
+    return float(np.dot(mag[start:start + 16], PRE))
+
+
 def slice_bits(mag, start, nbits=112):
     s = start + 16
     first = mag[s : s + 2 * nbits : 2]
     second = mag[s + 1 : s + 2 * nbits : 2]
     return (first > second).astype(np.uint8)      # blink in the first half = 1
+
+
+def confidence(mag, start, nbits=112):
+    """How clearly each bit was decided: |first - second| / (first + second), 0 = coin toss."""
+    s = start + 16
+    first = mag[s : s + 2 * nbits : 2]
+    second = mag[s + 1 : s + 2 * nbits : 2]
+    return np.abs(first - second) / (first + second + 1e-9)
+
+
+def repair(mag, start, bits):
+    """Flip the least confident bit, then the second least, then both; first checksum pass wins."""
+    a, b = np.argsort(confidence(mag, start))[:2]
+    for flips in ((a,), (b,), (a, b)):
+        trial = bits.copy()
+        trial[list(flips)] ^= 1
+        if crc24(trial) == 0:
+            return trial
+    return None
 
 
 def crc24(bits):
@@ -52,20 +76,34 @@ def bits_to_hex(bits):
     return f"{int(''.join(map(str, bits)), 2):0{len(bits) // 4}X}"
 
 
-def decode(mag, k=3.0, strict=False):
-    """All intact 112-bit messages as (start, hex), each physical message once."""
+def decode(mag, k=3.0, strict=False, repair_bits=False):
+    """All intact 112-bit messages as (start, hex), each physical message once.
+
+    With repair_bits, a candidate that fails the checksum gets up to three more tries
+    with its one or two least confident bits flipped.
+    """
     passes = []
     for start in candidates(mag, k, strict):
         bits = slice_bits(mag, start)
         if crc24(bits) == 0:
             passes.append((start, bits_to_hex(bits)))
+        elif repair_bits:
+            fixed = repair(mag, start, bits)
+            if fixed is not None:
+                passes.append((start, bits_to_hex(fixed)))
 
+    # Two reads less than a message apart cannot both be real: the same message caught again
+    # a few samples later, or a ghost (a shift by one bit can also pass the checksum when the
+    # last bit is 0). Keep whichever has the stronger preamble.
     found = []
     for start, m in passes:                       # already in time order
-        if found and found[-1][1] == m and start - found[-1][0] < 240:
-            continue                              # same message, caught again a few samples later
-        found.append((start, m))
-    return found
+        score = preamble_score(mag, start)
+        if found and start - found[-1][0] < 240:
+            if score > found[-1][2]:
+                found[-1] = (start, m, score)
+            continue
+        found.append((start, m, score))
+    return [(start, m) for start, m, _ in found]
 
 
 if __name__ == "__main__":
