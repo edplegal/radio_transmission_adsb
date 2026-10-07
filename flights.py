@@ -1,5 +1,6 @@
 import glob
 import math
+import sys
 from collections import defaultdict
 from datetime import datetime
 
@@ -20,7 +21,7 @@ TRAIL_S = 300        # each aircraft drags its last five minutes behind it
 
 def load(paths):
     """Positions (time, address, altitude, lat, lon) and callsigns from timestamped decoded files."""
-    pos, calls = [], {}
+    pos, calls, last = [], {}, {}
     for path in paths:
         with open(path) as f:
             for line in f:
@@ -33,6 +34,9 @@ def load(paths):
                     calls[addr] = fields[10].strip()
                 elif fields[1] == "3" and fields[14] and fields[15]:
                     lat, lon = float(fields[14]), float(fields[15])
+                    if (lat, lon) == last.get(addr):
+                        continue            # dump1090 repeats the last known position under a new time
+                    last[addr] = (lat, lon)
                     if distance_km(*RECEIVER, lat, lon) < MAX_KM:      # drop the bad pairings
                         alt = float(fields[11]) if fields[11] else math.nan
                         pos.append((t, addr, alt, lat, lon))
@@ -63,7 +67,9 @@ def split_flights(pos):
 
 
 if __name__ == "__main__":
-    pos, calls = load(sorted(glob.glob(f"{DATA}/sbs_t_*.txt")))
+    pattern = sys.argv[1] if len(sys.argv) > 1 else "sbs_t_*"       # e.g. sbs_t_20261006
+    tag = pattern.replace("*", "").replace("sbs_t_", "") or "all"
+    pos, calls = load(sorted(glob.glob(f"{DATA}/{pattern}.txt")))
     flights = split_flights(pos)
     clean = sorted(p for fl in flights for p in fl)     # what survived the speed cut
     print(f"{len(pos)} positions, {len(clean)} after the speed cut, {len(flights)} flights")
@@ -74,7 +80,7 @@ if __name__ == "__main__":
         ax.plot([p[4] for p in fl], [p[3] for p in fl], lw=0.6)
     ax.plot(RECEIVER[1], RECEIVER[0], marker="*", color="red", markersize=15)
     ax.set_title(f"{len(flights)} flights")
-    fig.savefig("results/flights.png", dpi=150)
+    fig.savefig(f"results/flights_{tag}.png", dpi=150)
 
     # The longest few, by name
     for fl in sorted(flights, key=len, reverse=True)[:10]:
@@ -102,7 +108,7 @@ if __name__ == "__main__":
         vax.set_title(datetime.fromtimestamp(now).strftime("%a %H:%M"))
         return dots,
 
-    FuncAnimation(vfig, draw, frames=frames).save("results/flights.mp4", fps=30)
+    FuncAnimation(vfig, draw, frames=frames).save(f"results/flights_{tag}.mp4", fps=30)
 
     top = sorted(flights, key=len, reverse=True)[:9]
     fig, axes = plt.subplots(3, 3, figsize=(12, 12))
@@ -113,7 +119,7 @@ if __name__ == "__main__":
         start = datetime.fromtimestamp(fl[0][0]).strftime("%H:%M")
         ax.set_title(f"{calls.get(fl[0][1], fl[0][1])}  {start}", fontsize=9)
         ax.set_xticks([]); ax.set_yticks([])
-    fig.savefig("results/top_flights.png", dpi=150)
+    fig.savefig(f"results/top_flights_{tag}.png", dpi=150)
 
     print("receiver:", RECEIVER)
     lats = [p[3] for p in clean]; lons = [p[4] for p in clean]
