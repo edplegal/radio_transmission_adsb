@@ -1,9 +1,17 @@
 dump1090/
 captures/
-results/
+results/*
+!results/summary_alldata.md
 *.bin
 __pycache__/
 .DS_Store
 .venv/
 receiver.py
 .ipynb_checkpoints
+report/logs_*.txt
+# privacy: geometry around the receiver never leaves this machine
+report/figures/flights_*
+report/figures/*polar*
+report/figures/*sector*
+*.mp4
+*.npz
