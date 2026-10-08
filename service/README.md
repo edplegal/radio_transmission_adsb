@@ -2,7 +2,9 @@
 
 Two background services, managed by launchd, that keep the receiver recording with no Terminal windows.
 
-- `com.radio.dump1090`: runs dump1090 with the network feeds on, restarted automatically if it exits.
+- `com.radio.dump1090`: runs dump1090 with the network feeds on (through `run_dump1090.sh`, which timestamps
+  every line of dump1090's diagnostic output into `data/dump1090.log`, plus its own start and dump1090's exit),
+  restarted automatically if it exits.
 - `com.radio.recorder`: `recorder.py`, writes `raw_t_YYYYMMDD.txt` and `sbs_t_YYYYMMDD.txt` into `data/`,
   one line per message, prefixed with arrival time. Reconnects after 10 minutes of silence; after 20,
   restarts dump1090. Everything it does goes to `data/recorder.log`.
@@ -31,7 +33,8 @@ Two background services, managed by launchd, that keep the receiver recording wi
 
 ## Everyday
 - Status: `launchctl list | grep com.radio` (a number in the first column = running, with that process id)
-- What happened: `tail -20 ~/Projects/radio_transmission/data/recorder.log`
+- What happened: `tail -20 ~/Projects/radio_transmission/data/recorder.log` and `... /data/dump1090.log`
+  (a hang shows as a recorder restart in the first and a `starting dump1090` line in the second)
 - Restart dump1090 by hand: `launchctl kickstart -k gui/$(id -u)/com.radio.dump1090`
 - Watch aircraft live: open http://localhost:8080 in a browser on the receiver
 

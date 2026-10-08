@@ -18,16 +18,14 @@ cat > "$AGENTS/com.radio.dump1090.plist" <<PLIST
 <plist version="1.0"><dict>
   <key>Label</key><string>com.radio.dump1090</string>
   <key>ProgramArguments</key><array>
-    <string>/usr/bin/caffeinate</string><string>-i</string>
-    <string>$PROJ/dump1090/dump1090</string>
-    <string>--net</string><string>--gain</string><string>40</string>
+    <string>/bin/bash</string>
+    <string>$PROJ/adsb/service/run_dump1090.sh</string>
   </array>
-  <key>WorkingDirectory</key><string>$PROJ/dump1090</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>
   <key>StandardOutPath</key><string>/dev/null</string>
-  <key>StandardErrorPath</key><string>$DATA/dump1090.log</string>
+  <key>StandardErrorPath</key><string>$DATA/dump1090.err</string>
 </dict></plist>
 PLIST
 
@@ -55,4 +53,4 @@ done
 
 echo "Installed. Check in a minute with:"
 echo "  launchctl list | grep com.radio"
-echo "  tail $DATA/recorder.log"
+echo "  tail $DATA/recorder.log $DATA/dump1090.log"
