@@ -15,3 +15,6 @@ report/figures/*polar*
 report/figures/*sector*
 *.mp4
 *.npz
+
+# the write-up, its figures and build stay local: never in the repository
+report/
