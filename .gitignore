@@ -1,7 +1,6 @@
 dump1090/
 captures/
-results/*
-!results/summary_alldata.md
+results/
 *.bin
 __pycache__/
 .DS_Store
@@ -18,3 +17,6 @@ report/figures/*sector*
 
 # the write-up, its figures and build stay local: never in the repository
 report/
+# notes, notebooks and summaries stay local: the repository holds code only
+*_notes.md
+*.ipynb
