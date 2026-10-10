@@ -1,6 +1,6 @@
 #!/bin/bash
 # Install dump1090 and the recorder as launchd services for the current user.
-# Run once on the receiver, from adsb/service:   bash install.sh
+# Run once on the receiver machine, from adsb/service:   bash install.sh
 # Stop any dump1090 and recording loops running in Terminal windows first.
 set -e
 

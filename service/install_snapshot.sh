@@ -1,6 +1,6 @@
 #!/bin/bash
 # Install the raw I/Q snapshot job (com.radio.snapshot) as a launchd service for the current user.
-# Run once on the receiver, from adsb/service:   bash install_snapshot.sh
+# Run once on the receiver machine, from adsb/service:   bash install_snapshot.sh
 # Needs rtl_sdr (brew install librtlsdr) and the dump1090 service from install.sh.
 set -e
 

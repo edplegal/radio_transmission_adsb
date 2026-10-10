@@ -14,7 +14,7 @@ Two background services, managed by launchd, that keep the receiver recording wi
   dump1090 again, whatever happened in between. Keeps the newest 8 files. Skips a run, and says why in
   `data/snapshot.log`, if the folder is missing or its disk has under 20 GB free.
 
-## Install (once, on the receiver)
+## Install (once, on the receiver machine)
 1. Stop dump1090 and the recording loops in any Terminal windows (Ctrl-C, close the windows).
 2. From `adsb/service`: `bash install.sh`
 
@@ -36,7 +36,7 @@ Two background services, managed by launchd, that keep the receiver recording wi
 - What happened: `tail -20 ~/Projects/radio_transmission/data/recorder.log` and `... /data/dump1090.log`
   (a hang shows as a recorder restart in the first and a `starting dump1090` line in the second)
 - Restart dump1090 by hand: `launchctl kickstart -k gui/$(id -u)/com.radio.dump1090`
-- Watch aircraft live: open http://localhost:8080 in a browser on the receiver
+- Watch aircraft live: open http://localhost:8080 in a browser on the receiver machine
 
 ## Remove
 ```
@@ -46,4 +46,4 @@ launchctl bootout gui/$(id -u)/com.radio.dump1090
 rm ~/Library/LaunchAgents/com.radio.*.plist
 ```
 
-Note: these run while you are logged in (locked screen is fine). After a restart of the receiver, log in once.
+Note: these run while you are logged in (locked screen is fine). After a restart of the receiver machine, log in once.
