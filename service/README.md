@@ -14,6 +14,12 @@ Two background services, managed by launchd, that keep the receiver recording wi
   dump1090 again, whatever happened in between. Keeps the newest 8 files. Skips a run, and says why in
   `data/snapshot.log`, if the folder is missing or its disk has under 20 GB free.
 
+- `com.radio.update`: `adsb/update.py`, every night at 00:30 (after midnight has closed the day's files),
+  brings the analysis up to date with whatever was recorded: decodes new raw snapshots once each (results
+  kept in `adsb/results/compare24/`, so they survive the 8-file rotation), reruns the synthetic and
+  test-recording results only when the code changed, and rebuilds `adsb/results/summary_alldata.md` from
+  every recording in `data/` and `backupData/`. Log: `data/update.log`.
+
 ## Install (once, on the receiver machine)
 1. Stop dump1090 and the recording loops in any Terminal windows (Ctrl-C, close the windows).
 2. From `adsb/service`: `bash install.sh`
@@ -31,6 +37,14 @@ Two background services, managed by launchd, that keep the receiver recording wi
   traffic, including the moments dump1090 accepts corrupt messages, which its text output cannot show.
   The files hold radio samples only, no positions.
 
+## Nightly analysis (`install_update.sh`)
+- Needs the project's `.venv` and `ffmpeg` (`brew install ffmpeg`, for the flight videos). Then from
+  `adsb/service`: `bash install_update.sh`.
+- Run it now instead of waiting: `launchctl kickstart gui/$(id -u)/com.radio.update`, or by hand from `adsb/`:
+  `../.venv/bin/python update.py` (`--all` also forces the code-only results).
+- Positions, coverage and flights need `adsb/receiver.py` (`RECEIVER = (lat, lon)`, git-ignored); without it
+  the summary says those sections are pending and everything else is still computed.
+
 ## Everyday
 - Status: `launchctl list | grep com.radio` (a number in the first column = running, with that process id)
 - What happened: `tail -20 ~/Projects/radio_transmission/data/recorder.log` and `... /data/dump1090.log`
@@ -40,6 +54,7 @@ Two background services, managed by launchd, that keep the receiver recording wi
 
 ## Remove
 ```
+launchctl bootout gui/$(id -u)/com.radio.update
 launchctl bootout gui/$(id -u)/com.radio.snapshot
 launchctl bootout gui/$(id -u)/com.radio.recorder
 launchctl bootout gui/$(id -u)/com.radio.dump1090

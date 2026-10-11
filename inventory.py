@@ -1,16 +1,16 @@
-"""Inventory of every recording in data/: what it is, when, how big, and what is wrong with it.
+"""Inventory of every recording in data/ and backupData/: what it is, when, how big, and what is wrong with it.
 
 Also builds the deduplicated message streams the other tools should analyse, so nothing is
 counted twice when the same message sits in two files (afternoon.txt vs raw_*, or a file
 that was moved while the recorder was writing to it).
 """
-import glob
 import os
 import re
 from collections import Counter
 from datetime import datetime
 
-DATA = "../data"
+from paths import data_files, label
+
 GAP_S = 600
 
 STAMPED = re.compile(r"^\d{10}\.\d{3},")                 # '1791139612.361,' prefix from stamp.py / recorder.py
@@ -18,7 +18,7 @@ STAMPED = re.compile(r"^\d{10}\.\d{3},")                 # '1791139612.361,' pre
 
 def kind(name):
     base = os.path.basename(name)
-    if base.startswith("raw") or base.startswith("afternoon"):
+    if base.startswith(("raw", "afternoon", "00_raw")):        # 00_raw_20260928: the first afternoon
         return "raw"
     if base.startswith("sbs"):
         return "decoded"
@@ -62,7 +62,7 @@ def scan(path):
         first, last, source = None, mtime, "mtime only"
     else:
         source = "timestamps"
-    return {"path": path, "name": os.path.basename(path), "kind": kind(path), "lines": n,
+    return {"path": path, "name": label(path), "kind": kind(path), "lines": n,
             "stamped": stamped, "unstamped": unstamped, "first": first, "last": last,
             "time_source": source, "gaps": gaps, "size": os.path.getsize(path), "payloads": lines}
 
@@ -72,7 +72,7 @@ def fmt(t):
 
 
 def inventory():
-    files = sorted(glob.glob(f"{DATA}/*.txt"))
+    files = data_files("*.txt")
     rows = [scan(p) for p in files]
     return rows
 

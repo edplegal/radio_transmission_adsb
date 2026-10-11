@@ -1,12 +1,11 @@
 """Survey every recorded hex message with our own decoding, and check callsigns against dump1090's."""
-import glob
 from collections import Counter, defaultdict
 
 import matplotlib.pyplot as plt
 
 from fields import fields
 
-DATA = "../data"
+from paths import data_files
 
 TYPE_NAMES = {**{t: "identification" for t in range(1, 5)},
               **{t: "surface position" for t in range(5, 9)},
@@ -47,7 +46,7 @@ if __name__ == "__main__":
     ours = defaultdict(set)                 # address -> callsigns we decoded
     altitudes = []
     n = 0
-    for path in sorted(glob.glob(f"{DATA}/raw_*.txt")) + sorted(glob.glob(f"{DATA}/afternoon*.txt")):
+    for path in data_files("raw_*.txt") + data_files("afternoon*.txt") + data_files("00_raw*.txt"):
         for m in hex_messages(path):
             f = fields(m)
             n += 1
@@ -66,7 +65,7 @@ if __name__ == "__main__":
     print(f"\n{len(ours)} aircraft identified, {len(every_callsign)} distinct callsigns")
     print("airlines (first three letters):", Counter(c[:3] for c in every_callsign).most_common(10))
 
-    theirs = dump1090_callsigns(sorted(glob.glob(f"{DATA}/sbs_*.txt")))
+    theirs = dump1090_callsigns(data_files("sbs_*.txt"))
     shared = [a for a in ours if a in theirs]
     agree = [a for a in shared if theirs[a] in ours[a]]
     print(f"\ncallsign check vs dump1090: {len(agree)} of {len(shared)} shared aircraft agree")

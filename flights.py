@@ -1,4 +1,3 @@
-import glob
 import math
 import sys
 from collections import defaultdict
@@ -8,10 +7,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
-from receiver import RECEIVER
+try:
+    from receiver import RECEIVER          # (lat, lon) of the antenna; git-ignored, stays on this machine
+except ImportError:
+    RECEIVER = None
 from coverage import distance_km
 
-DATA = "../data"
+from paths import data_files
 GAP_S = 600          # unheard this long = a new flight
 MAX_KM = 150         # farther than this from the receiver = a bad position
 MAX_KM_S = 0.35      # faster than any airliner (about 1260 km/h) = a bad position
@@ -69,7 +71,7 @@ def split_flights(pos):
 if __name__ == "__main__":
     pattern = sys.argv[1] if len(sys.argv) > 1 else "sbs_t_*"       # e.g. sbs_t_20261006
     tag = pattern.replace("*", "").replace("sbs_t_", "") or "all"
-    pos, calls = load(sorted(glob.glob(f"{DATA}/{pattern}.txt")))
+    pos, calls = load(data_files(f"{pattern}.txt"))
     flights = split_flights(pos)
     clean = sorted(p for fl in flights for p in fl)     # what survived the speed cut
     print(f"{len(pos)} positions, {len(clean)} after the speed cut, {len(flights)} flights")

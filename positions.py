@@ -1,5 +1,4 @@
 """Sitting 8: positions from our own decoding of the raw messages, graded against dump1090."""
-import glob
 import math
 from collections import defaultdict
 
@@ -7,9 +6,12 @@ import matplotlib.pyplot as plt
 
 from coverage import distance_km
 from fields import fields, local_position, position
-from receiver import RECEIVER
+try:
+    from receiver import RECEIVER          # (lat, lon) of the antenna; git-ignored, stays on this machine
+except ImportError:
+    RECEIVER = None
 
-DATA = "../data"
+from paths import data_files
 MAX_AGE_S = 10       # the standard: partner message at most this old
 MATCH_S = 1.0        # the two recording loops stamp the same message slightly apart
 MAX_AGE_LINES = 35   # untimestamped files: about 6 s at the average 5.5 messages per second
@@ -109,9 +111,9 @@ def grade(ours, theirs):
 
 
 if __name__ == "__main__":
-    msgs = [m for path in sorted(glob.glob(f"{DATA}/raw_t_*.txt")) for m in read_raw(path)]
+    msgs = [m for path in data_files("raw_t_*.txt") for m in read_raw(path)]
     theirs = defaultdict(list)
-    for path in sorted(glob.glob(f"{DATA}/sbs_t_*.txt")):
+    for path in data_files("sbs_t_*.txt"):
         for addr, rows in read_dump1090(path).items():
             theirs[addr].extend(rows)
     n_theirs = sum(len(v) for v in theirs.values())
@@ -146,7 +148,7 @@ if __name__ == "__main__":
     # The old recordings have no times, so "fresh" can only mean "few messages ago".
     # At night few messages arrive, a few messages ago can be minutes ago, and stale
     # pairs slip through: the distance cut catches them.
-    old = list(read_raw_untimed(sorted(glob.glob(f"{DATA}/raw_2*.txt"))))
+    old = list(read_raw_untimed(data_files("00_raw*.txt") + data_files("raw_2*.txt")))
     got, unusable = decode_positions(old, max_age=MAX_AGE_LINES)
     dist = [distance_km(*RECEIVER, p[3], p[4]) for p in got]
     keep = [p for p, d in zip(got, dist) if d < MAX_KM]

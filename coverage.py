@@ -1,13 +1,15 @@
-import glob
 import math
 
 import folium
 from folium.plugins import HeatMap
 import matplotlib.pyplot as plt
-from receiver import RECEIVER
+try:
+    from receiver import RECEIVER          # (lat, lon) of the antenna; git-ignored, stays on this machine
+except ImportError:
+    RECEIVER = None
 
 EARTH_KM = 6371.0
-DATA = "../data"
+from paths import data_files
 
 def distance_km(lat1, lon1, lat2, lon2):
     """Great-circle distance (haversine)."""
@@ -42,7 +44,7 @@ def positions(path):
 
 
 if __name__ == "__main__":
-    rows = [r for path in sorted(glob.glob(f"{DATA}/sbs_*.txt")) for r in positions(path)]
+    rows = [r for path in data_files("sbs_*.txt") for r in positions(path)]
 
     import statistics
     clat = statistics.median(r[2] for r in rows)

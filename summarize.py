@@ -3,7 +3,6 @@
 Every number in the summary comes from this run. Nothing from the receiver's location is
 printed: positions are reduced to distance and bearing before they reach the text.
 """
-import glob
 import math
 import os
 import re
@@ -17,9 +16,13 @@ import numpy as np
 
 from coverage import bearing_deg, distance_km
 from fields import fields, local_position, nl
+from paths import data_files
 from inventory import deduplicated, fmt, inventory, overlaps, table_markdown
+try:
+    from receiver import RECEIVER          # (lat, lon) of the antenna; git-ignored, stays on this machine
+except ImportError:
+    RECEIVER = None
 from positions import MAX_AGE_LINES, MAX_AGE_S, MAX_KM, compare_methods, decode_positions
-from receiver import RECEIVER
 from survey import TYPE_NAMES, dump1090_callsigns
 
 OUT = "results/summary_alldata.md"
@@ -33,6 +36,21 @@ def run(cmd):
     lines = [ln for ln in (r.stdout + r.stderr).splitlines()
              if "NotOpenSSLWarning" not in ln and "warnings.warn" not in ln]
     return "\n".join(lines).strip()
+
+
+def flights_output(tag):
+    """flights.py's printed summary for one day. Its video takes minutes to render, so a day is only
+    redone when one of its files changed after the last run (in practice: today, still recording)."""
+    cache = f"results/flights_{tag}.txt"
+    newest = max(os.path.getmtime(p) for p in data_files(f"sbs_t_{tag}.txt"))
+    if os.path.exists(cache) and os.path.getmtime(cache) > newest:
+        with open(cache) as f:
+            return f.read()
+    out = run([PY, "flights.py", f"sbs_t_{tag}"])
+    if re.match(r"\d+ positions, \d+ after the speed cut, \d+ flights", out):
+        with open(cache, "w") as f:
+            f.write(out)
+    return out
 
 
 def day_of(t, name):
@@ -78,94 +96,8 @@ def corrupt_positions(single):
     return bad
 
 
-def main():
-    md = []
-    rows = inventory()
-    ov = overlaps(rows)
-
-    # ---------------------------------------------------------------- 1. inventory
-    md.append("# Summary of all recordings\n")
-    md.append(f"Generated {datetime.now():%Y-%m-%d %H:%M} by `summarize.py` on the data folder as it stands on this "
-              f"machine. Latest line in any file: {fmt(max(r['last'] for r in rows))}.\n")
-    md.append("## 1. Inventory\n")
-    md.append(table_markdown(rows) + "\n")
-    empty = [r["name"] for r in rows if r["lines"] == 0]
-    mixed = [r["name"] for r in rows if r["stamped"] and r["unstamped"]]
-    dropped = {n: v for n, v in ov.items() if v[1] is not None}
-    md.append(f"- Empty files: {', '.join(empty) if empty else 'none'}.")
-    md.append(f"- Files mixing timestamped and bare lines: {', '.join(mixed) if mixed else 'none'}.")
-    md.append(f"- Content repeated from an earlier file (runs of {10} identical consecutive lines, at least 100 of "
-              f"them): {', '.join(f'{n} lines {v[1]}-{v[2]}' for n, v in dropped.items()) if dropped else 'none'}. "
-              + ("Those line ranges are excluded below. " if dropped else "")
-              + f"Single identical lines are not duplicates: a transponder "
-              f"repeats its identification message every few seconds, and 53-67% of lines in every raw file "
-              f"are byte-identical repeats of an earlier line in the same file.")
-    md.append("- 'first'/'last' for files without timestamps come from the filename (start) and the file's "
-              "modification time (end).")
-    gaps = [(r["name"], a, b) for r in rows for a, b in r["gaps"]]
-    md.append(f"- Gaps longer than 10 minutes in timestamped files: {len(gaps)}" +
-              ("".join(f"\n    - {n}: {fmt(a)} -> {fmt(b)} ({(b - a) / 60:.0f} min)" for n, a, b in gaps) if gaps else "."))
-    md.append("")
-
-    # ---------------------------------------------------------------- 2. messages, deduplicated
-    raw = list(deduplicated(rows, "raw"))                      # (t or None, payload, file)
-    msgs = []                                                  # (t or running index, hex, day)
-    hex_re = re.compile(r"\*([0-9A-Fa-f]+);")
-    for i, (t, p, name) in enumerate(raw):
-        m = hex_re.search(p)
-        if m:
-            msgs.append((t, m.group(1).upper(), day_of(t, name)))
-    adsb = [(t, h, d) for t, h, d in msgs if len(h) == 28 and int(h[:2], 16) >> 3 == 17]
-    md.append("## 2. Message stream\n")
-    md.append(f"{len(raw)} raw lines after deduplication, {len(msgs)} parse as hex messages, "
-              f"{len(adsb)} are 112-bit ADS-B (downlink format 17). {sum(1 for t, _, _ in adsb if t is not None)} "
-              f"of those carry a timestamp.\n")
-
-    # ---------------------------------------------------------------- 3. tests, receiver versions, sweep
-    md.append("## 3. Receiver on the test recording and on synthetic data\n")
-    md.append("Tests (`pytest tests`):\n```\n" + run([PY, "-m", "pytest", "-q", "tests"]).splitlines()[-1] + "\n```\n")
-    md.append("Every decoder version replayed on `modes1.bin` against dump1090's 85 ADS-B messages "
-              "(`versions.py`):\n```\n" + run([PY, "versions.py"]) + "\n```\n")
-    md.append("`compare.py` (current code; misses classified):\n```\n" + run([PY, "compare.py"]) + "\n```\n")
-    sweep = run([PY, "sweep.py"])
-    md.append("Synthetic noise sweep (`sweep.py`, 90 planted messages per point):\n```\n" + sweep + "\n```\n")
-
-    # ---------------------------------------------------------------- 4. survey
-    md.append("## 4. Field survey (`fields.py` over every ADS-B message)\n")
-    by_type = Counter()
-    calls = defaultdict(set)
-    per_day = defaultdict(lambda: {"msgs": 0, "aircraft": set(), "positions": 0, "flights": "-",
-                                   "hours": 0.0, "gaps": 0})
-    altitudes = []
-    for t, h, d in adsb:
-        f = fields(h)
-        by_type[f["tc"]] += 1
-        per_day[d]["msgs"] += 1
-        per_day[d]["aircraft"].add(f["icao"])
-        if f.get("callsign"):
-            calls[f["icao"]].add(f["callsign"])
-        if "altitude" in f:
-            altitudes.append(f["altitude"])
-    md.append("| type code | meaning | messages | share |\n|---:|---|---:|---:|")
-    for tc, c in sorted(by_type.items()):
-        md.append(f"| {tc} | {TYPE_NAMES.get(tc, 'other')} | {c} | {c / len(adsb):.1%} |")
-    every = sorted({c for cs in calls.values() for c in cs})
-    airlines = Counter(c[:3] for c in every if c[:3].isalpha()).most_common(12)
-    md.append(f"\n{len({f for _, h, _ in adsb for f in [h[2:8]]})} distinct aircraft addresses; "
-              f"{len(calls)} of them sent a callsign; {len(every)} distinct callsigns.")
-    md.append("Most common callsign prefixes (airline codes): " +
-              ", ".join(f"{a} {n}" for a, n in airlines) + ".")
-    theirs = dump1090_callsigns(sorted(glob.glob("../data/sbs*.txt")))
-    shared = [a for a in calls if a in theirs]
-    agree = [a for a in shared if theirs[a] in calls[a]]
-    md.append(f"Callsign check against dump1090: {len(agree)} of {len(shared)} shared aircraft agree"
-              + ("." if len(agree) == len(shared) else "; disagreements: " +
-                 ", ".join(f"{a} {sorted(calls[a])} vs {theirs[a]}" for a in shared if a not in agree) + "."))
-    alts = np.array(altitudes)
-    md.append(f"Altitudes in position messages: {len(alts)} values, median {np.median(alts):.0f} ft, "
-              f"10th-90th percentile {np.percentile(alts, 10):.0f}-{np.percentile(alts, 90):.0f} ft, "
-              f"{np.mean(alts < 10000):.0%} below 10,000 ft.\n")
-
+def geometry(md, adsb, per_day):
+    """Sections 5-7: everything that needs the receiver's position. Returns what section 9 uses."""
     # ---------------------------------------------------------------- 5. positions
     md.append("## 5. Positions (`fields.position`, `fields.local_position`)\n")
     stream_all = []                                            # (key, hex) for the single-message method
@@ -342,9 +274,8 @@ def main():
     # ---------------------------------------------------------------- 7. flights per timestamped day
     md.append("## 7. Flights (`flights.py`, timestamped days)\n")
     md.append("| day | positions read | after speed cut | flights | video |\n|---|---:|---:|---:|---|")
-    for path in sorted(glob.glob("../data/sbs_t_*.txt")):
-        tag = os.path.basename(path)[6:-4]
-        out = run([PY, "flights.py", f"sbs_t_{tag}"])
+    for tag in sorted({os.path.basename(p)[6:-4] for p in data_files("sbs_t_*.txt")}):
+        out = flights_output(tag)
         first = out.splitlines()[0] if out else ""
         m = re.match(r"(\d+) positions, (\d+) after the speed cut, (\d+) flights", first)
         day = f"{tag[:4]}-{tag[4:6]}-{tag[6:]}"
@@ -355,6 +286,106 @@ def main():
             md.append(f"| {day} | could not run: `{first[:60]}` | | | |")
     md.append("\n(`flights.py` reads dump1090's decoded positions, skips its repeated stale positions, applies "
               f"the {MAX_KM} km and 0.35 km/s cuts, and splits at 10-minute silences.)\n")
+    return {"single": single, "dist": dist, "corrupt": corrupt, "elev": elev, "lows": lows,
+            "pairs": pairs, "pairs_u": pairs_u, "unusable": unusable, "unusable_u": unusable_u}
+
+
+def main():
+    md = []
+    rows = inventory()
+    ov = overlaps(rows)
+
+    # ---------------------------------------------------------------- 1. inventory
+    md.append("# Summary of all recordings\n")
+    md.append(f"Generated {datetime.now():%Y-%m-%d %H:%M} by `summarize.py` on the data folder as it stands on this "
+              f"machine. Latest line in any file: {fmt(max(r['last'] for r in rows))}.\n")
+    md.append("## 1. Inventory\n")
+    md.append(table_markdown(rows) + "\n")
+    empty = [r["name"] for r in rows if r["lines"] == 0]
+    mixed = [r["name"] for r in rows if r["stamped"] and r["unstamped"]]
+    dropped = {n: v for n, v in ov.items() if v[1] is not None}
+    md.append(f"- Empty files: {', '.join(empty) if empty else 'none'}.")
+    md.append(f"- Files mixing timestamped and bare lines: {', '.join(mixed) if mixed else 'none'}.")
+    md.append(f"- Content repeated from an earlier file (runs of {10} identical consecutive lines, at least 100 of "
+              f"them): {', '.join(f'{n} lines {v[1]}-{v[2]}' for n, v in dropped.items()) if dropped else 'none'}. "
+              + ("Those line ranges are excluded below. " if dropped else "")
+              + f"Single identical lines are not duplicates: a transponder "
+              f"repeats its identification message every few seconds, and 53-67% of lines in every raw file "
+              f"are byte-identical repeats of an earlier line in the same file.")
+    md.append("- 'first'/'last' for files without timestamps come from the filename (start) and the file's "
+              "modification time (end).")
+    gaps = [(r["name"], a, b) for r in rows for a, b in r["gaps"]]
+    md.append(f"- Gaps longer than 10 minutes in timestamped files: {len(gaps)}" +
+              ("".join(f"\n    - {n}: {fmt(a)} -> {fmt(b)} ({(b - a) / 60:.0f} min)" for n, a, b in gaps) if gaps else "."))
+    md.append("")
+
+    # ---------------------------------------------------------------- 2. messages, deduplicated
+    raw = list(deduplicated(rows, "raw"))                      # (t or None, payload, file)
+    msgs = []                                                  # (t or running index, hex, day)
+    hex_re = re.compile(r"\*([0-9A-Fa-f]+);")
+    for i, (t, p, name) in enumerate(raw):
+        m = hex_re.search(p)
+        if m:
+            msgs.append((t, m.group(1).upper(), day_of(t, name)))
+    adsb = [(t, h, d) for t, h, d in msgs if len(h) == 28 and int(h[:2], 16) >> 3 == 17]
+    md.append("## 2. Message stream\n")
+    md.append(f"{len(raw)} raw lines after deduplication, {len(msgs)} parse as hex messages, "
+              f"{len(adsb)} are 112-bit ADS-B (downlink format 17). {sum(1 for t, _, _ in adsb if t is not None)} "
+              f"of those carry a timestamp.\n")
+
+    # ---------------------------------------------------------------- 3. tests, receiver versions, sweep
+    md.append("## 3. Receiver on the test recording and on synthetic data\n")
+    md.append("Tests (`pytest tests`):\n```\n" + run([PY, "-m", "pytest", "-q", "tests"]).splitlines()[-1] + "\n```\n")
+    md.append("Every decoder version replayed on `modes1.bin` against dump1090's 85 ADS-B messages "
+              "(`versions.py`):\n```\n" + run([PY, "versions.py"]) + "\n```\n")
+    md.append("`compare.py` (current code; misses classified):\n```\n" + run([PY, "compare.py"]) + "\n```\n")
+    sweep = run([PY, "sweep.py"])
+    md.append("Synthetic noise sweep (`sweep.py`, 90 planted messages per point):\n```\n" + sweep + "\n```\n")
+
+    # ---------------------------------------------------------------- 4. survey
+    md.append("## 4. Field survey (`fields.py` over every ADS-B message)\n")
+    by_type = Counter()
+    calls = defaultdict(set)
+    per_day = defaultdict(lambda: {"msgs": 0, "aircraft": set(), "positions": 0, "flights": "-",
+                                   "hours": 0.0, "gaps": 0})
+    altitudes = []
+    for t, h, d in adsb:
+        f = fields(h)
+        by_type[f["tc"]] += 1
+        per_day[d]["msgs"] += 1
+        per_day[d]["aircraft"].add(f["icao"])
+        if f.get("callsign"):
+            calls[f["icao"]].add(f["callsign"])
+        if "altitude" in f:
+            altitudes.append(f["altitude"])
+    md.append("| type code | meaning | messages | share |\n|---:|---|---:|---:|")
+    for tc, c in sorted(by_type.items()):
+        md.append(f"| {tc} | {TYPE_NAMES.get(tc, 'other')} | {c} | {c / len(adsb):.1%} |")
+    every = sorted({c for cs in calls.values() for c in cs})
+    airlines = Counter(c[:3] for c in every if c[:3].isalpha()).most_common(12)
+    md.append(f"\n{len({f for _, h, _ in adsb for f in [h[2:8]]})} distinct aircraft addresses; "
+              f"{len(calls)} of them sent a callsign; {len(every)} distinct callsigns.")
+    md.append("Most common callsign prefixes (airline codes): " +
+              ", ".join(f"{a} {n}" for a, n in airlines) + ".")
+    theirs = dump1090_callsigns(data_files("sbs*.txt"))
+    shared = [a for a in calls if a in theirs]
+    agree = [a for a in shared if theirs[a] in calls[a]]
+    md.append(f"Callsign check against dump1090: {len(agree)} of {len(shared)} shared aircraft agree"
+              + ("." if len(agree) == len(shared) else "; disagreements: " +
+                 ", ".join(f"{a} {sorted(calls[a])} vs {theirs[a]}" for a in shared if a not in agree) + "."))
+    alts = np.array(altitudes)
+    md.append(f"Altitudes in position messages: {len(alts)} values, median {np.median(alts):.0f} ft, "
+              f"10th-90th percentile {np.percentile(alts, 10):.0f}-{np.percentile(alts, 90):.0f} ft, "
+              f"{np.mean(alts < 10000):.0%} below 10,000 ft.\n")
+
+    # ---------------------------------------------------------------- 5-7. positions, coverage, flights
+    if RECEIVER is None:
+        g = None
+        md.append("## 5-7. Positions, coverage and flights\n")
+        md.append("Not computed: the receiver's position (`adsb/receiver.py`, `RECEIVER = (lat, lon)`, git-ignored) "
+                  "is not on this machine. Add it and rerun.\n")
+    else:
+        g = geometry(md, adsb, per_day)
 
     # ---------------------------------------------------------------- 8. per day
     md.append("## 8. Per day\n")
@@ -389,22 +420,25 @@ def main():
         hi, lo = max(rates, key=rates.get), min(rates, key=rates.get)
         md.append(f"- Message rate ranges from {rates[lo]:.0f}/h ({lo}) to {rates[hi]:.0f}/h ({hi}); days whose "
                   f"files cover mostly night hours sit at the low end.")
-    share = {d: v["positions"] / v["msgs"] for d, v in per_day.items() if v["msgs"] > 1000}
-    md.append(f"- Share of ADS-B messages that are position messages, by day (days with over 1000 messages): "
-              + ", ".join(f"{d} {s:.1%}" for d, s in sorted(share.items())) + f"; overall {len(single) / len(adsb):.1%}.")
     per_h = {d: len(v["aircraft"]) / v["hours"] for d, v in per_day.items() if v["hours"] > 1}
     md.append("- Distinct aircraft per recording hour, by day: " + ", ".join(f"{d} {x:.0f}" for d, x in sorted(per_h.items())) + ".")
-    md.append(f"- Lowest elevation per 10-degree sector ranges {lows.min():.1f}-{lows.max():.1f} deg; "
-              f"{np.sum(elev < 2)} of {len(elev)} positions are below 2 deg elevation. The effective horizon is "
-              f"several degrees up in every direction (indoor antenna).")
-    if corrupt:
-        md.append(f"- {len(corrupt)} corrupt position message(s) passed the 24-bit checksum in {len(single)} position "
-                  f"messages (1 in {len(single) // len(corrupt)}); {sum(1 for i in corrupt if dist[i] < MAX_KM)} of "
-                  f"them landed within {MAX_KM} km and would have passed a distance cut.")
-    md.append(f"- {unusable} + {unusable_u} even/odd pairs were unusable because the latitudes straddled a "
-              f"longitude-zone band edge (1 in {(len(pairs) + len(pairs_u)) // max(unusable + unusable_u, 1)} pairs).")
-    md.append("- Nothing could not be computed for the data present. Days not on this machine are simply absent "
-              "from the inventory.\n")
+    if g:
+        single, dist, corrupt, elev, lows = g["single"], g["dist"], g["corrupt"], g["elev"], g["lows"]
+        pairs, pairs_u, unusable, unusable_u = g["pairs"], g["pairs_u"], g["unusable"], g["unusable_u"]
+        share = {d: v["positions"] / v["msgs"] for d, v in per_day.items() if v["msgs"] > 1000}
+        md.append(f"- Share of ADS-B messages that are position messages, by day (days with over 1000 messages): "
+                  + ", ".join(f"{d} {s:.1%}" for d, s in sorted(share.items())) + f"; overall {len(single) / len(adsb):.1%}.")
+        md.append(f"- Lowest elevation per 10-degree sector ranges {lows.min():.1f}-{lows.max():.1f} deg; "
+                  f"{np.sum(elev < 2)} of {len(elev)} positions are below 2 deg elevation. The effective horizon is "
+                  f"several degrees up in every direction (indoor antenna).")
+        if corrupt:
+            md.append(f"- {len(corrupt)} corrupt position message(s) passed the 24-bit checksum in {len(single)} position "
+                      f"messages (1 in {len(single) // len(corrupt)}); {sum(1 for i in corrupt if dist[i] < MAX_KM)} of "
+                      f"them landed within {MAX_KM} km and would have passed a distance cut.")
+        md.append(f"- {unusable} + {unusable_u} even/odd pairs were unusable because the latitudes straddled a "
+                  f"longitude-zone band edge (1 in {(len(pairs) + len(pairs_u)) // max(unusable + unusable_u, 1)} pairs).")
+    md.append("- Days not on this machine are simply absent from the inventory."
+              + ("" if g else " Positions, coverage and flights are pending the receiver's position.") + "\n")
 
     with open(OUT, "w") as f:
         f.write("\n".join(md))

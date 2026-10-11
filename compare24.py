@@ -6,7 +6,9 @@ take the magnitude, run decode.decode; run decode24.decode on the original magni
 distinct checksum-valid 112-bit messages per decoder and mode, messages only one decoder found,
 and whether each decoded aircraft address appears in more than one message of that recording
 (an address seen once is the signature of a false message that happened to pass the checksum).
-Outputs go to results/compare24.md (git-ignored) and stdout.
+Each snapshot's result is kept in results/compare24/<snapshot>.md and never recomputed (pass --force
+to redo), so results outlive snapshot.sh's rotation, which keeps only the newest 8 files.
+results/compare24.md (git-ignored) gathers every result kept so far.
 """
 import glob
 import os
@@ -18,6 +20,7 @@ from scipy.signal import resample_poly
 
 import decode
 import decode24
+from paths import RAW_IQ
 
 CHUNK = 2_400_000 * 10                            # resample 10 s at a time
 EDGE = 2400                                       # overlap to hide the filter's edges
@@ -51,6 +54,7 @@ def run(path, k=3.0):
     name = os.path.basename(path)
     iq = load_iq(path)
     mag24 = np.abs(iq).astype(np.float32)
+    level = (float(np.std(iq.real)), float(np.median(mag24)), float(mag24.max()))
     mag20 = resampled_mag(iq)
     del iq
     res = {}
@@ -58,11 +62,13 @@ def run(path, k=3.0):
         for rep in (False, True):
             found = fn(mag, k, repair_bits=rep) if fn is decode24.decode else fn(mag, k, False, rep)
             res[(label, rep)] = found
-    return name, res
+    return name, res, level
 
 
-def report(name, res):
-    lines = [f"## {name}", "", "| decoder | repair | reads | distinct messages | distinct ADS-B (DF17) | addresses | addresses seen once |",
+def report(name, res, level):
+    std, med, peak = level
+    lines = [f"## {name}", "", f"Signal: I/Q noise std {std:.2f} counts, median magnitude {med:.1f}, peak {peak:.1f} "
+             f"(full scale 127)." + (" No messages from any decoder." if not any(res.values()) else ""), "", "| decoder | repair | reads | distinct messages | distinct ADS-B (DF17) | addresses | addresses seen once |",
              "|---|---|---:|---:|---:|---:|---:|"]
     for (label, rep), found in res.items():
         msgs = [m for _, m in found]
@@ -93,14 +99,26 @@ def report(name, res):
     return "\n".join(lines)
 
 
+CACHE = "results/compare24"
+
+
 if __name__ == "__main__":
-    paths = sorted(glob.glob("../data/raw_iq/*.bin")) if len(sys.argv) < 2 else sys.argv[1:]
-    out = ["# 2.0 MHz (resampled) vs 2.4 MHz (native) on the raw snapshots", ""]
+    force = "--force" in sys.argv
+    args = [a for a in sys.argv[1:] if a != "--force"]
+    paths = args or sorted(glob.glob(os.path.join(RAW_IQ, "*.bin")))
+    os.makedirs(CACHE, exist_ok=True)
     for p in paths:
-        name, res = run(p)
-        text = report(name, res)
+        cached = os.path.join(CACHE, os.path.basename(p)[:-4] + ".md")
+        if os.path.exists(cached) and not force:
+            continue
+        name, res, level = run(p)
+        text = report(name, res, level)
         print(text)
-        out.append(text)
-    os.makedirs("results", exist_ok=True)
+        with open(cached, "w") as f:
+            f.write(text)
+    kept = sorted(glob.glob(os.path.join(CACHE, "*.md")))
+    out = ["# 2.0 MHz (resampled) vs 2.4 MHz (native) on the raw snapshots", "",
+           f"{len(kept)} snapshot(s); a snapshot's result stays here after snapshot.sh deletes the file.", ""]
+    out += [open(c).read() for c in kept]
     with open("results/compare24.md", "w") as f:
         f.write("\n".join(out))
