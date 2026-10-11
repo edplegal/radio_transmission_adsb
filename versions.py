@@ -9,8 +9,8 @@ from compare import DUMP1090_READ_LIMIT, RECORDING, TRUTH, is_adsb, load_key
 from decode import load_mag
 
 VERSIONS = [                       # commit, label, keyword arguments the version accepts
-    ("720774c", "Sep 28: strict preamble, k=4, skip 240 after a pass", {}),
-    ("ff07d71", "Oct 5: any preamble, k=3, dedupe same hex", {}),
+    ("06548b6", "Sep 28: strict preamble, k=4, skip 240 after a pass", {}),
+    ("e8b6618", "Oct 5: any preamble, k=3, dedupe same hex", {}),
     ("HEAD", "Oct 7: keep stronger preamble of overlapping reads", {}),
     ("HEAD", "Oct 7: same, with repair_bits", {"repair_bits": True}),
 ]

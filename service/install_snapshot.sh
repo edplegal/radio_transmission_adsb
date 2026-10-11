@@ -14,7 +14,8 @@ mkdir -p "$AGENTS" "$SNAP_DIR"
 [ -x /opt/homebrew/bin/rtl_sdr ] || { echo "rtl_sdr not found; brew install librtlsdr"; exit 1; }
 [ -f "$AGENTS/com.radio.dump1090.plist" ] || { echo "dump1090 service not installed; run install.sh first"; exit 1; }
 
-# 07:45, 12:15, 17:30, 21:30 local time: quiet morning, midday, evening peak, late evening.
+# 10:00, 13:30, 15:30, 17:00 local time: the busiest quarter-hours in the Oct 6-11 recordings (median
+# 26-31 aircraft heard per 15 minutes; traffic is roughly flat 10:00-20:00 and thin after 22:00).
 cat > "$AGENTS/com.radio.snapshot.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -28,10 +29,10 @@ cat > "$AGENTS/com.radio.snapshot.plist" <<PLIST
     <key>SNAP_DIR</key><string>$SNAP_DIR</string>
   </dict>
   <key>StartCalendarInterval</key><array>
-    <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>45</integer></dict>
-    <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>15</integer></dict>
-    <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>30</integer></dict>
-    <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>0</integer></dict>
   </array>
   <key>RunAtLoad</key><false/>
   <key>StandardErrorPath</key><string>$DATA/snapshot.err</string>
@@ -41,6 +42,6 @@ PLIST
 launchctl bootout "gui/$UID_NUM/com.radio.snapshot" 2>/dev/null || true
 launchctl bootstrap "gui/$UID_NUM" "$AGENTS/com.radio.snapshot.plist"
 
-echo "Installed. Snapshots go to $SNAP_DIR at 07:45, 12:15, 17:30 and 21:30."
+echo "Installed. Snapshots go to $SNAP_DIR at 10:00, 13:30, 15:30 and 17:00."
 echo "  try one now:   bash $PROJ/adsb/service/snapshot.sh && tail -5 $DATA/snapshot.log"
 echo "  status:        launchctl list | grep com.radio.snapshot"
